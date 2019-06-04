@@ -2,6 +2,11 @@
 # Transactions
 # ################################################# #
 
+struct Witness
+  tx_witnesses_n
+  component_length
+  witness
+end
 
 struct TxInputs
   txid
@@ -25,14 +30,15 @@ struct Transaction
   output_count 
   outputs::Vector{TxOutputs}
   locktime
+  witness::Vector
 end
 
-struct Witness
-  tx_witnesses_n
-  component_length
-  witness
+function Base.show(io::IO, o::Transaction)
+  println("Version: $(o.version)")
+  println("Segwit: $(o.segwit)")
+  println("Inputs: $(o.input_count)")
+  println("Outputs: $(o.output_count)")
 end
-
 
 
 function readtransactions(o::IOBuffer, ntx)
@@ -68,19 +74,25 @@ function readtransactions(o::IOBuffer, ntx)
       push!(outputs, TxOutputs(value, scriptpubkey_size, scriptpubkey))
     end
     
+    witlst=[]
     if segwit == true
       for ix in 1:length(inputs) # for number of inputs
         (tx_witnesses_n, sz) = readvarint(o)
+        component_length_list = []
+        witness_list = []
         for i in 1:tx_witnesses_n
           (component_length, sz) = readvarint(o)
           witness = read(o, component_length) |> bytes2hex
-        end # for
-      end # for
-    end
+          push!(component_length_list, component_length)
+          push!(witness_list, witness)
+        end # for i
+        push!(witlst, Witness(tx_witnesses_n, component_length_list, witness_list))
+      end # for ix
+    end # if
 
     locktime = read(o, Int32)
     push!(transactions, Transaction(version, segwit, input_count, inputs,
-                                    output_count, outputs, locktime))
+                                    output_count, outputs, locktime, witlst))
   end # for tx                                  
 
   return transactions
