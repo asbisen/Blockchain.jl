@@ -44,6 +44,7 @@ function scanblocks(filename)
       return nothing
     end # if
   end # while
+  close(fd)
   return offsets
 end # scanblocks
 
@@ -96,7 +97,8 @@ function readblock(b::BlockFile, n::Int)
   (ntx, sz) = readvarint(fd)
   # body = read(fd, (block_size-80-sz))
   transactions = readtransactions(read(fd, (block_size-80-sz))|> IOBuffer, ntx)
-
+  
+  close(fd)
   Block(magic, block_size, header, ntx, transactions)
 end # readblock
 
@@ -120,16 +122,16 @@ number of bytes the pos of IOStream  was changed by.
 function readvarint(fd)
   dat = read(fd, 1)[1]
   if dat == 0xfd
-    val = reinterpret(Int16, read(fd, 2))[1]
+    val = reinterpret(UInt16, read(fd, 2))[1]
     sz = 3
   elseif dat == 0xfe
-    val = reinterpret(Int32, read(fd, 4))[1]
+    val = reinterpret(UInt32, read(fd, 4))[1]
     sz = 5
   elseif dat == 0xff
-    val = reinterpret(Int64, read(fd, 8))[1]
+    val = reinterpret(UInt64, read(fd, 8))[1]
     sz = 9
   else
-    val = reinterpret(Int8, dat)
+    val = reinterpret(UInt8, dat)
     sz = 1
   end # if
   return (val, sz)
@@ -200,13 +202,18 @@ struct Transaction
   locktime
 end
 
+struct Witness
+  tx_witnesses_n
+  component_length
+  witness
+end
+
 
 
 function readtransactions(o::IOBuffer, ntx)
   transactions = []
-
   for tx in 1:ntx
-    version = read(o, Int32)
+    @show version = read(o, Int32)
 
     segwit = false
     tmp = read(o, Int16)
@@ -216,9 +223,10 @@ function readtransactions(o::IOBuffer, ntx)
       seek(o, (position(o)-2)) # seek back 2 bytes
     end
 
-    @show position(o), segwit
+    @show tx, segwit
+    
 
-    @show (input_count, sz) = readvarint(o)
+    (input_count, sz) = readvarint(o)
     inputs = []
     for inp in 1:input_count
       txid = bytes2hex(read(o, 32))
@@ -228,8 +236,8 @@ function readtransactions(o::IOBuffer, ntx)
       sequence = read(o, 4) |> bytes2hex
       push!(inputs, TxInputs(txid, vout, scriptsig_size, scriptsig, sequence))
     end
-
-    @show (output_count, sz) = readvarint(o)
+    
+    (output_count, sz) = readvarint(o)
     outputs = []
     for out in 1:output_count
       value = read(o, Int64)
@@ -238,6 +246,14 @@ function readtransactions(o::IOBuffer, ntx)
       push!(outputs, TxOutputs(value, scriptpubkey_size, scriptpubkey))
     end
     
+    if segwit == true
+      @show (tx_witnesses_n, sz) = readvarint(o)
+      for i in 1:tx_witnesses_n
+        (component_length, sz) = readvarint(o)
+        witness = read(o, component_length) |> bytes2hex
+      end # for
+    end # if
+
     locktime = read(o, Int32)
     push!(transactions, Transaction(version, segwit, input_count, inputs,
                                     output_count, outputs, locktime))
@@ -249,3 +265,17 @@ end
 
 
 
+
+function txvalue(t::Transaction)
+  val=0
+  nout=length(t.outputs)
+  for i in 1:nout
+    val+=t.outputs[i].value
+  end
+  return val
+end
+
+
+
+b=BlockFile("../data/blk01650.dat")
+b[20]
