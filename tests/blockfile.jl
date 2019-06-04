@@ -94,9 +94,10 @@ function readblock(b::BlockFile, n::Int)
   block_size = reinterpret(Int32, read(fd, 4))[1]
   header = BlockHeader(read(fd, 80))
   (ntx, sz) = readvarint(fd)
-  body = read(fd, (block_size-80-sz))
+  # body = read(fd, (block_size-80-sz))
+  transactions = readtransactions(read(fd, (block_size-80-sz))|> IOBuffer, ntx)
 
-  Block(magic, block_size, header, ntx, body)
+  Block(magic, block_size, header, ntx, transactions)
 end # readblock
 
 
@@ -144,7 +145,7 @@ struct Block
   size::Int
   header::BlockHeader
   numtx::Int
-  transactions::Array{UInt8}
+  transactions::Array{Transaction}
 end #  Block
 
 function Base.show(io::IO,  o::Block)
@@ -170,27 +171,81 @@ function Base.getindex(o::BlockFile, v::Vector{Int})
 end
 
 
+# ################################################# #
+# Transactions
+# ################################################# #
 
 
-
-function tx(o::IOBuffer)
-  version = read(o, Int32)
-  
-  segwit = false
-  tmp = read(o, Int16)
-  if tmp == 256
-    segwit = true
-  else
-    seek(o, (position(o)-2)) # seek back 2 bytes
-  end
-
-  @show (val, sz) = readvarint(o)
-  txhash = read(o, 32)
-  
-  return (version, segwit, val, txhash)
+struct TxInputs
+  txid
+  vout
+  scriptsig_size
+  scriptsig
+  sequence
 end
 
-t=b[22].transactions;
-f=IOBuffer(t);
-tx(f)
+struct TxOutputs
+  value
+  scriptpubkey_size
+  scriptpubkey
+end
+
+struct Transaction
+  version
+  segwit
+  input_count 
+  inputs::Vector{TxInputs}
+  output_count 
+  outputs::Vector{TxOutputs}
+  locktime
+end
+
+
+
+function readtransactions(o::IOBuffer, ntx)
+  transactions = []
+
+  for tx in 1:ntx
+    version = read(o, Int32)
+
+    segwit = false
+    tmp = read(o, Int16)
+    if tmp == 256
+      segwit = true
+    else
+      seek(o, (position(o)-2)) # seek back 2 bytes
+    end
+
+    @show position(o), segwit
+
+    @show (input_count, sz) = readvarint(o)
+    inputs = []
+    for inp in 1:input_count
+      txid = bytes2hex(read(o, 32))
+      vout = read(o, Int32)
+      (scriptsig_size, sz) = readvarint(o)
+      scriptsig = read(o, scriptsig_size) |>  bytes2hex
+      sequence = read(o, 4) |> bytes2hex
+      push!(inputs, TxInputs(txid, vout, scriptsig_size, scriptsig, sequence))
+    end
+
+    @show (output_count, sz) = readvarint(o)
+    outputs = []
+    for out in 1:output_count
+      value = read(o, Int64)
+      (scriptpubkey_size, sz) = readvarint(o)
+      scriptpubkey = read(o, scriptpubkey_size) |> bytes2hex
+      push!(outputs, TxOutputs(value, scriptpubkey_size, scriptpubkey))
+    end
+    
+    locktime = read(o, Int32)
+    push!(transactions, Transaction(version, segwit, input_count, inputs,
+                                    output_count, outputs, locktime))
+  end # for tx                                  
+
+  return transactions
+end
+
+
+
 
