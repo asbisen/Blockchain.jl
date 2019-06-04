@@ -38,7 +38,7 @@ end
 function readtransactions(o::IOBuffer, ntx)
   transactions = []
   for tx in 1:ntx
-    @show version = read(o, Int32)
+    version = read(o, Int32)
 
     segwit = false
     tmp = read(o, Int16)
@@ -47,9 +47,6 @@ function readtransactions(o::IOBuffer, ntx)
     else
       seek(o, (position(o)-2)) # seek back 2 bytes
     end
-
-    @show tx, segwit
-    
 
     (input_count, sz) = readvarint(o)
     inputs = []
@@ -72,12 +69,14 @@ function readtransactions(o::IOBuffer, ntx)
     end
     
     if segwit == true
-      @show (tx_witnesses_n, sz) = readvarint(o)
-      for i in 1:tx_witnesses_n
-        (component_length, sz) = readvarint(o)
-        witness = read(o, component_length) |> bytes2hex
+      for ix in 1:length(inputs) # for number of inputs
+        (tx_witnesses_n, sz) = readvarint(o)
+        for i in 1:tx_witnesses_n
+          (component_length, sz) = readvarint(o)
+          witness = read(o, component_length) |> bytes2hex
+        end # for
       end # for
-    end # if
+    end
 
     locktime = read(o, Int32)
     push!(transactions, Transaction(version, segwit, input_count, inputs,
